@@ -114,8 +114,29 @@ export async function seedTrades(
   return created;
 }
 
+/**
+ * Every trade the caller owns, paged.
+ *
+ * One call with a large `limit` is not enough, and the difference misleads: the
+ * chunking test imports 601 rows, and a one-shot `limit: 500` returned exactly
+ * 500 — which reads as "the second chunk never landed" rather than "the helper
+ * stopped asking".
+ */
 export async function allTrades(api: APIRequestContext): Promise<Trade[]> {
-  const response = await listTrades(api, { limit: 500 });
-  if (!response.ok()) throw new Error(`GET /trades failed: ${response.status()}`);
-  return body<Trade[]>(response);
+  const PAGE = 200;
+  const collected: Trade[] = [];
+
+  for (let offset = 0; ; offset += PAGE) {
+    const response = await listTrades(api, { limit: PAGE, offset });
+    if (!response.ok()) {
+      throw new Error(`GET /trades failed: ${response.status()} ${await response.text()}`);
+    }
+    const page = await body<Trade[]>(response);
+    collected.push(...page);
+    if (page.length < PAGE) return collected;
+
+    // A journal is capped well below this; looping forever on an endpoint that
+    // stopped honouring `offset` would be a worse failure than an error.
+    if (offset > 20_000) throw new Error('GET /trades paged past 20k rows — refusing to loop');
+  }
 }

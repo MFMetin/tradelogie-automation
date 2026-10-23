@@ -1,0 +1,209 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { env, REPO_ROOT } from '../src/config/env';
+
+/**
+ * Copies the strings the suite selects by out of the app's own dictionaries.
+ *
+ * Text-based selectors need the exact string, and hand-typing it goes wrong in
+ * ways that are tedious to debug: the Turkish dictionary uses the typographic
+ * apostrophe (CSV’den, not CSV'den), several entries interpolate, and the app
+ * defaults to Turkish so a wrong guess fails only on someone else's machine.
+ *
+ * Generated and committed rather than imported at runtime. The suite is its own
+ * repository and must run with nothing but its own files — but the generated
+ * file is also checked by `tests/ui/i18n-sync.spec.ts`, which regenerates it
+ * and fails if the app's copy has moved. So drift is loud rather than silent,
+ * and it fails in one obvious place instead of in a dozen unrelated tests.
+ *
+ *     npm run sync:i18n
+ */
+const KEYS = [
+  // Auth
+  'auth.email',
+  'auth.password',
+  'auth.repeatPassword',
+  'auth.username',
+  'auth.login',
+  'auth.register',
+  'auth.loginTitle',
+  'auth.registerTitle',
+  'auth.showPassword',
+  'auth.hidePassword',
+  'auth.resendVerification',
+  'auth.resendSent',
+  'auth.verifyTitle',
+  'auth.invalidCredentials',
+  'auth.loginNeedsVerify',
+  'auth.accountLocked',
+  'auth.accountLockedIn',
+  'auth.accountLockedInMinutes',
+  'auth.passwordTooShort',
+  'auth.passwordMismatch',
+  'auth.newPassword',
+  'auth.confirmPassword',
+  'auth.resetTitle',
+  'common.submit',
+  'auth.haveAccount',
+
+  // Shared vocabulary
+  'common.cancel',
+  'common.delete',
+  'common.close',
+  'common.long',
+  'common.short',
+  'common.open',
+
+  // Journal + trade form
+  'dash.logTrade',
+  'tf.logTitle',
+  'tf.editTitle',
+  'tf.symbol',
+  'tf.side',
+  'tf.status',
+  'tf.entryPrice',
+  'tf.exitPrice',
+  'tf.sizeQty',
+  'tf.openedAt',
+  'tf.closedAt',
+  'tf.realizedPnl',
+  'tf.fee',
+  'tf.notes',
+  'tf.longBuy',
+  'tf.shortSell',
+  'tf.statusOpen',
+  'tf.statusClosed',
+  'tf.addTrade',
+  'tf.saveChanges',
+  'jr.searchSymbol',
+  'jr.details',
+  'jr.edit',
+  'jr.filterByAccount',
+  'jr.sortLabel',
+  'jr.manual',
+  'jr.selectRow',
+  'jr.filters',
+  'jr.filtersActive',
+
+  // CSV wizard
+  'csv.import',
+  'csv.title',
+  'csv.browse',
+  'csv.next',
+  'csv.back',
+  'csv.importBtn',
+  'csv.notMapped',
+  'csv.dateFormat',
+  'csv.saveMapping',
+  'csv.mappingName',
+  'csv.discardTitle',
+  'csv.resultTitle',
+  'csv.resultImported',
+  'csv.resultSkipped',
+  'csv.resultFailed',
+
+  // Shell
+  'topbar.signOut',
+  'topbar.openMenu',
+  'topbar.closeMenu',
+  'topbar.switchToLight',
+  'topbar.switchToDark',
+  'topbar.streak',
+  'topbar.level',
+
+  // Billing + legal
+  'bl.activateTest',
+  'legal.privacy',
+  'legal.terms',
+  'legal.kvkk',
+  'legal.distanceSales',
+  'eb.title',
+  'dash.netPnl',
+  'dash.winRate',
+  'dash.profitFactor',
+  'dash.winLossShort',
+  'an.totalTrades',
+  'an.closed',
+  'an.bestTrade',
+  'an.worstTrade',
+  'an.totalFees',
+  'an.expectancy',
+] as const;
+
+/**
+ * Reads one dictionary as text and pulls out the keys we asked for.
+ *
+ * Parsed rather than imported: the dictionaries are TypeScript modules in
+ * another repository, and importing them would make this script depend on that
+ * repository's build. Every entry is a single-line `'key': 'value',` pair, so a
+ * line-oriented read is enough — and if that ever stops being true, this throws
+ * on a missing key rather than guessing.
+ */
+function readDictionary(file: string): Map<string, string> {
+  const source = fs.readFileSync(file, 'utf8');
+  const found = new Map<string, string>();
+  const missing: string[] = [];
+
+  for (const key of KEYS) {
+    // Matches  'auth.email': 'Email',  with either quote style, and keeps any
+    // escaped quote inside the value.
+    const pattern = new RegExp(
+      `^\\s*'${key.replace(/\./g, '\\.')}':\\s*(['"])((?:\\\\.|(?!\\1).)*)\\1`,
+      'm',
+    );
+    const match = source.match(pattern);
+    if (!match) {
+      missing.push(key);
+      continue;
+    }
+    // Un-escape what the source escaped, so the value is the rendered string.
+    found.set(key, match[2]!.replace(/\\(['"\\])/g, '$1'));
+  }
+
+  if (missing.length > 0) {
+    // All of them at once. Reporting the first and stopping turns a rename in
+    // the dictionary into a dozen rounds of run-fix-run.
+    throw new Error(
+      `${path.basename(file)} has no single-line entry for:\n  ${missing.join('\n  ')}`,
+    );
+  }
+
+  return found;
+}
+
+export function generate(): string {
+  const en = readDictionary(path.join(env.webRepo, 'src/i18n/en.ts'));
+  const tr = readDictionary(path.join(env.webRepo, 'src/i18n/tr.ts'));
+
+  const entries = KEYS.map((key) => {
+    const english = JSON.stringify(en.get(key));
+    const turkish = JSON.stringify(tr.get(key));
+    return `  '${key}': { en: ${english}, tr: ${turkish} },`;
+  }).join('\n');
+
+  return `/**
+ * GENERATED by \`npm run sync:i18n\` from the app's own dictionaries.
+ * Do not edit by hand — \`tests/ui/i18n-sync.spec.ts\` regenerates this and
+ * fails if it has drifted from src/i18n/{en,tr}.ts in the web repository.
+ *
+ * Only the strings the suite selects by are here. Hand-typing them goes wrong
+ * quietly: the Turkish entries use the typographic apostrophe, several
+ * interpolate, and the app defaults to Turkish, so a wrong guess passes on the
+ * machine that wrote it and fails everywhere else.
+ */
+export const STRINGS = {
+${entries}
+} as const;
+
+export type StringKey = keyof typeof STRINGS;
+`;
+}
+
+const OUTPUT = path.join(REPO_ROOT, 'src/utils/strings.ts');
+
+if (process.argv[1]?.includes('sync-i18n')) {
+  fs.writeFileSync(OUTPUT, generate());
+  console.log(`wrote ${path.relative(REPO_ROOT, OUTPUT)} (${KEYS.length} keys)`);
+}
+
+export { OUTPUT, KEYS };

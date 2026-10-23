@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import type { APIRequestContext } from '@playwright/test';
+import type { APIRequestContext, APIResponse } from '@playwright/test';
 import { env } from '../config/env';
 import { newApiContext, body, type ApiUser, type LoginResponse } from '../api/client';
 import { register, loginOrThrow } from '../api/auth';
@@ -31,6 +31,43 @@ export function uniqueUsername(prefix = 'e2e'): string {
 export const DEFAULT_PASSWORD = 'E2ePassw0rd!';
 
 /**
+ * Runs a fixture call, waiting out a 429 rather than failing on it.
+ *
+ * Every fixture account in the run is minted by the SAME admin, and
+ * `adminWriteLimiter` is keyed per user at thirty a minute. Creating one
+ * account costs two of those calls, so three projects' worth of workers
+ * comfortably exceed it — and the symptom is a fixture error inside an
+ * unrelated test, which is the most expensive kind of failure to read.
+ *
+ * A 429 here is a wait, not a refusal, which is exactly how the product's own
+ * CSV wizard treats one: it resends the same chunk after `Retry-After` instead
+ * of leaving a big import half-landed. Same reasoning, same approach.
+ *
+ * Only a 429 is retried. Anything else is a real failure and has to surface.
+ */
+async function waitingOutRateLimits(
+  what: string,
+  call: () => Promise<APIResponse>,
+  attempts = 4,
+): Promise<APIResponse> {
+  let response = await call();
+
+  for (let attempt = 1; attempt < attempts && response.status() === 429; attempt += 1) {
+    const seconds = Number(response.headers()['retry-after']);
+    // The limiter's window is a minute, so Retry-After is at most 60. The
+    // fallback covers a 429 that arrives without the header at all.
+    const waitMs = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 2_000 * attempt;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(waitMs, 65_000)));
+    response = await call();
+  }
+
+  if (!response.ok()) {
+    throw new Error(`${what} failed: ${response.status()} ${await response.text()}`);
+  }
+  return response;
+}
+
+/**
  * Registers an account and leaves it exactly as the product does: unverified,
  * no tokens, nothing granted. This is the starting state the auth UI tests
  * need — they are testing the road from here.
@@ -41,10 +78,9 @@ export async function createUnverifiedUser(
 ): Promise<{ id: string; email: string; username: string; password: string }> {
   const email = uniqueEmail(prefix);
   const username = uniqueUsername();
-  const response = await register(api, { email, password: DEFAULT_PASSWORD, username });
-  if (!response.ok()) {
-    throw new Error(`Register failed for ${email}: ${response.status()} ${await response.text()}`);
-  }
+  await waitingOutRateLimits(`register ${email}`, () =>
+    register(api, { email, password: DEFAULT_PASSWORD, username }),
+  );
   // Register answers `{ requires_verification, email }` and no id, so the
   // admin endpoints have nothing to address until we look it up.
   const id = await findUserIdByEmail(email);
@@ -67,15 +103,12 @@ export async function createPremiumUser(prefix = 'user'): Promise<TestUser> {
   try {
     const account = await createUnverifiedUser(anon, prefix);
 
-    const verified = await verifyUserEmail(asAdmin, account.id);
-    if (!verified.ok()) {
-      throw new Error(`Admin verify failed: ${verified.status()} ${await verified.text()}`);
-    }
-
-    const granted = await setPremium(asAdmin, account.id, { isPremium: true, lifetime: true });
-    if (!granted.ok()) {
-      throw new Error(`Admin premium grant failed: ${granted.status()} ${await granted.text()}`);
-    }
+    await waitingOutRateLimits('admin verify-email', () =>
+      verifyUserEmail(asAdmin, account.id),
+    );
+    await waitingOutRateLimits('admin premium grant', () =>
+      setPremium(asAdmin, account.id, { isPremium: true, lifetime: true }),
+    );
 
     const session = await loginOrThrow(anon, account.email, account.password);
     return {
@@ -104,10 +137,9 @@ export async function createVerifiedUser(prefix = 'free'): Promise<TestUser> {
 
   try {
     const account = await createUnverifiedUser(anon, prefix);
-    const verified = await verifyUserEmail(asAdmin, account.id);
-    if (!verified.ok()) {
-      throw new Error(`Admin verify failed: ${verified.status()} ${await verified.text()}`);
-    }
+    await waitingOutRateLimits('admin verify-email', () =>
+      verifyUserEmail(asAdmin, account.id),
+    );
     const session = await loginOrThrow(anon, account.email, account.password);
     return {
       id: account.id,

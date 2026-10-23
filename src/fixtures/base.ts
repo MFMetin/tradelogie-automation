@@ -1,15 +1,21 @@
-import { test as base, expect, type APIRequestContext, type Page } from '@playwright/test';
+import {
+  test as base,
+  expect,
+  type APIRequestContext,
+  type BrowserContext,
+  type Page,
+} from '@playwright/test';
 import { env } from '../config/env';
 import { newApiContext } from '../api/client';
 import { readAdminState } from './globalSetup';
 import { createPremiumUser, createVerifiedUser, type TestUser } from './users';
 
 /**
- * Storage keys the real app uses. Taken from the source, not guessed:
- * lib/api.ts for the two tokens, AuthContext for the cached profile,
- * LanguageContext and ThemeContext for the two preferences.
+ * Storage keys the real app uses, read from its source rather than guessed:
+ * `lib/api.ts` for the two tokens, `AuthContext` for the cached profile,
+ * `LanguageContext` and `ThemeContext` for the two preferences.
  */
-const KEYS = {
+export const KEYS = {
   access: 'tj_access_token',
   refresh: 'tj_refresh_token',
   user: 'tj_user',
@@ -19,71 +25,77 @@ const KEYS = {
 
 export type Theme = 'dark' | 'light';
 
-export interface AppPageOptions {
+export interface SessionOptions {
   theme?: Theme;
   lang?: 'tr' | 'en';
   session?: TestUser | null;
 }
 
 /**
- * Everything a page needs before the bundle evaluates.
+ * Builds the `storageState` a context starts with.
  *
- * `addInitScript` and not `evaluate`: LanguageContext resolves the language at
- * module load (`setFormatLanguage(getInitialLanguage())`) and ThemeContext's
- * value is read by an inline script in index.html before first paint. Writing
- * these after load means the first render is in the wrong language and the
- * page then flips, which is both a flake and a wrong screenshot.
+ * `storageState` and not `addInitScript`, and the difference is a bug this
+ * suite actually had: an init script runs on EVERY navigation, so after a test
+ * signed out, the next `goto` wrote the tokens straight back and the protected
+ * route opened. The test asserting that sign-out works passed while proving
+ * the opposite.
+ *
+ * Seeding the context once is also the only way to get the language right.
+ * `LanguageContext` resolves it at module load and the pre-paint snippet in
+ * index.html reads the theme before React exists, so both have to be in place
+ * before the bundle evaluates — which rules out a post-load `evaluate`.
  */
-export async function primePage(page: Page, options: AppPageOptions = {}): Promise<void> {
-  const theme: Theme = options.theme ?? 'dark';
-  const lang = options.lang ?? env.lang;
-  const session = options.session ?? null;
+export function storageStateFor(options: SessionOptions = {}) {
+  const items: { name: string; value: string }[] = [
+    // The app defaults to Turkish and never consults navigator.language, so a
+    // suite that does not pin this reads a different UI per machine.
+    { name: KEYS.lang, value: options.lang ?? env.lang },
+    { name: KEYS.theme, value: options.theme ?? 'dark' },
+  ];
 
-  await page.addInitScript(
-    ({ keys, lang: language, theme: colour, session: account }) => {
-      try {
-        localStorage.setItem(keys.lang, language);
-        localStorage.setItem(keys.theme, colour);
-        if (account) {
-          localStorage.setItem(keys.access, account.accessToken);
-          localStorage.setItem(keys.refresh, account.refreshToken);
-          // The cached profile is what makes the first paint the real page.
-          // Without it AuthContext starts `initializing` and the guards show a
-          // loader until /users/me answers — a race every navigation re-runs.
-          localStorage.setItem(keys.user, JSON.stringify(account.user));
-        } else {
-          localStorage.removeItem(keys.access);
-          localStorage.removeItem(keys.refresh);
-          localStorage.removeItem(keys.user);
-        }
-      } catch {
-        // A storage-denied context would mean the app itself cannot run; the
-        // navigation that follows will say so far more clearly than a throw here.
-      }
-    },
-    { keys: KEYS, lang, theme, session },
-  );
+  if (options.session) {
+    items.push(
+      { name: KEYS.access, value: options.session.accessToken },
+      { name: KEYS.refresh, value: options.session.refreshToken },
+      // The cached profile is what makes the first paint the real page. Without
+      // it AuthContext starts `initializing` and the guards render a loader
+      // until /users/me answers — a race every navigation re-runs.
+      { name: KEYS.user, value: JSON.stringify(options.session.user) },
+    );
+  }
 
-  // lib/traffic.ts fires page-view beacons from the production bundle, which is
-  // what the suite serves. They would write rows the whole run and show up in
-  // any test that counts requests.
+  return {
+    cookies: [],
+    origins: [{ origin: env.baseURL, localStorage: items }],
+  };
+}
+
+/**
+ * Per-page setup that genuinely does belong on every navigation.
+ *
+ * `lib/traffic.ts` fires page-view beacons from the production bundle, which is
+ * what this suite serves. Left alone they write rows for the whole run and turn
+ * up in any test that counts requests.
+ */
+export async function blockAnalytics(page: Page): Promise<void> {
   await page.route('**/analytics/**', (route) => route.fulfill({ status: 204, body: '' }));
 }
 
 interface Fixtures {
-  /** A page with language, theme and no session pinned. */
+  /** A context with the preferences pinned and no session. */
+  anonContext: BrowserContext;
   anonPage: Page;
-  /** A page already signed in as a premium account, with the cache warm. */
+  /** A context already signed in as a premium account, cache warm. */
+  authedContext: BrowserContext;
   authedPage: Page;
   /** The account `authedPage` is signed in as. */
   premiumUser: TestUser;
   /** Verified, not premium — for the paywall tests. */
   freeUser: TestUser;
-  /** API context as `premiumUser`. */
+  /** A page for any account, or for none, with the preferences overridable. */
+  pageAs: (user: TestUser | null, options?: SessionOptions) => Promise<Page>;
   userApi: APIRequestContext;
-  /** API context with no credentials. */
   anonApi: APIRequestContext;
-  /** API context as the bootstrap admin. */
   adminApi: APIRequestContext;
 }
 
@@ -91,9 +103,11 @@ interface WorkerFixtures {
   /**
    * One account per worker, not per test.
    *
-   * adminWriteLimiter allows 30 admin mutations a minute and creating a user
-   * costs two of them, so a per-test account would meter the suite at fifteen
-   * tests a minute per worker. Per-worker it is two calls per worker per run.
+   * `adminWriteLimiter` allows thirty admin mutations a minute and creating an
+   * account costs two, so a per-test account would meter the suite at fifteen
+   * tests a minute per worker. Per worker it is two calls for the whole run.
+   * Tests in one worker therefore share a journal, which is why anything
+   * asserting on a whole listing clears it first (`fixtures/data.ts`).
    */
   workerUser: TestUser;
 }
@@ -115,14 +129,46 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
     await use(await createVerifiedUser());
   },
 
-  anonPage: async ({ page }, use) => {
-    await primePage(page);
+  anonContext: async ({ browser }, use) => {
+    const context = await browser.newContext({ storageState: storageStateFor() });
+    await use(context);
+    await context.close();
+  },
+
+  anonPage: async ({ anonContext }, use) => {
+    const page = await anonContext.newPage();
+    await blockAnalytics(page);
     await use(page);
   },
 
-  authedPage: async ({ page, workerUser }, use) => {
-    await primePage(page, { session: workerUser });
+  authedContext: async ({ browser, workerUser }, use) => {
+    const context = await browser.newContext({
+      storageState: storageStateFor({ session: workerUser }),
+    });
+    await use(context);
+    await context.close();
+  },
+
+  authedPage: async ({ authedContext }, use) => {
+    const page = await authedContext.newPage();
+    await blockAnalytics(page);
     await use(page);
+  },
+
+  pageAs: async ({ browser }, use) => {
+    const opened: BrowserContext[] = [];
+
+    await use(async (user, options = {}) => {
+      const context = await browser.newContext({
+        storageState: storageStateFor({ ...options, session: user }),
+      });
+      opened.push(context);
+      const page = await context.newPage();
+      await blockAnalytics(page);
+      return page;
+    });
+
+    for (const context of opened) await context.close();
   },
 
   userApi: async ({ workerUser }, use) => {

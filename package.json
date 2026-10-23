@@ -20,7 +20,8 @@
     "report": "playwright show-report",
     "report:allure": "allure generate allure-results --clean -o allure-report && allure open allure-report",
     "typecheck": "tsc --noEmit",
-    "k6": "tsx scripts/run-k6.ts"
+    "k6": "tsx scripts/run-k6.ts",
+    "sync:i18n": "tsx scripts/sync-i18n.ts"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.14.0",
