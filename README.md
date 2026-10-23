@@ -189,7 +189,9 @@ the tests:
   rasterisation differs per platform, so a baseline taken on Windows fails on
   the runner on every pixel of every glyph. `.gitignore` excludes the `darwin`
   and `win32` directories; [`visual.yml`](.github/workflows/visual.yml) is the
-  only thing that writes the committed set.
+  only thing that writes the committed set, and it pushes them to a branch for
+  review rather than straight to `main`. Run it locally and you get your own
+  platform's baselines, which are yours alone.
 - **`a11y-baseline.json` has one entry**: four light-theme contrast failures in
   the journal toolbar. Recorded so a *fifth* fails the build — not accepted as
   correct. Six entries came off that file while the suite was being written.
@@ -205,6 +207,30 @@ the tests:
 - `npm run k6` needs the [k6 binary](https://grafana.com/docs/k6/latest/set-up/install-k6/)
   and a backend started separately. It refuses to run against anything but
   localhost, twice.
+
+## In CI
+
+`e2e.yml` checks out all three repositories, starts Postgres as a service and
+lets Playwright's `webServer` do the rest — the same commands a person runs
+locally. **245 tests in about two and a half minutes**, in two jobs: the suite,
+and the rate limiters in a process of their own.
+
+It reads the two private application repositories over SSH with a read-only
+deploy key each, so there is nothing to set up by hand and no token to renew.
+
+Two guards exist because of one bad run. The suite needs the API's rate
+limiters off — the global ceiling is 120 requests a minute per IP and a parallel
+run exceeds it in seconds — and the first full CI run had checked out a revision
+of the API from before that flag existed. The result was 187 red tests over 24
+minutes, none of which pointed at the cause. Now the workflow greps the
+checked-out API for the flag before it even installs a browser, and global setup
+reads `RateLimit-Limit` from one request and stops with a paragraph naming the
+problem. One line instead of 187.
+
+[`smoke-prod.yml`](.github/workflows/smoke-prod.yml) runs twice a day against
+the live site and needs no secret at all. [`pages.yml`](.github/workflows/pages.yml)
+publishes both reports from the run that triggered it — Playwright's for the
+trace viewer, Allure's for trends across runs.
 
 ## Layout
 
