@@ -96,6 +96,22 @@ jobs:
           # locally it is run once, since it uses `create` and not `upsert`.
           npm run db:seed
 
+      # The suite runs with the limiters off. If the checked-out API does not
+      # support the flag, every test that creates an account queues behind
+      # adminWriteLimiter and the run dies of ~190 timeouts with no hint as to
+      # why. That happened once, because CI checked out a commit of the API
+      # from before the flag existed. One grep turns that into one clear line.
+      - name: Check the API supports DISABLE_RATE_LIMIT
+        working-directory: app-api
+        run: |
+          if ! grep -q 'disableRateLimit' src/config/env.ts; then
+            echo "::error::This revision of the API has no DISABLE_RATE_LIMIT support."
+            echo "The suite needs it: the global ceiling is 120 req/min per IP and a"
+            echo "parallel run exceeds it in seconds. Update trading_journal_backend."
+            exit 1
+          fi
+          echo "DISABLE_RATE_LIMIT is supported by this revision."
+
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 

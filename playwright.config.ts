@@ -85,7 +85,11 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!env.isCI,
   retries: env.isCI ? 2 : 0,
-  workers: env.isCI ? 4 : undefined,
+  // Two on CI, not four: a GitHub runner has two cores, and four Chromium
+  // instances next to a Node API contend badly enough that tests start timing
+  // out on work that is only slow. Locally Playwright's own default (half the
+  // cores) is right.
+  workers: env.isCI ? 2 : undefined,
   // Roomy on purpose. A test that needs its own account waits out
   // `adminWriteLimiter` when several workers ask at once — every fixture
   // account in the run is minted by the same admin, and the suite respects
