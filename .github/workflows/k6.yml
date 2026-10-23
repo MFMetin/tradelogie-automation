@@ -47,7 +47,7 @@ jobs:
         with:
           repository: MFMetin/trading_journal_backend
           path: app-api
-          token: ${{ secrets.APP_REPOS_TOKEN }}
+          ssh-key: ${{ secrets.API_REPO_DEPLOY_KEY }}
 
       - uses: actions/setup-node@v4
         with:

@@ -7,8 +7,9 @@ End-to-end, API, accessibility and visual-regression tests for
 [Tradelogie](https://tradelogie.com) — a gamified trading journal (React 19 +
 Vite client, Express 5 + Prisma API).
 
-**259 tests** across six Playwright projects. The suite starts both halves of
-the application itself, so a run is one command on a clean machine.
+**287 tests** across eight Playwright projects — 261 of them in the default
+run, which takes about 90 seconds. The suite starts both halves of the
+application itself, so that is one command on a clean machine.
 
 > 🇹🇷 Türkçe anlatım aşağıda: [Türkçe](#türkçe)
 
@@ -18,9 +19,9 @@ the application itself, so a run is one command on a clean machine.
 
 | Project | Tests | What it is |
 |---|---|---|
-| `api` | 81 | The HTTP contract the UI is written against. No browser, so it is the fastest layer and the first to fail. |
-| `ui-desktop` | 66 | The app at 1440×900, driven through page objects. |
-| `ui-mobile` | 66 | The same tests on a Pixel 5. The journal renders cards instead of a table below `lg`, and the nav becomes a drawer. |
+| `api` | 75 | The HTTP contract the UI is written against. No browser, so it is the fastest layer and the first to fail. |
+| `ui-desktop` | 68 | The app at 1440×900, driven through page objects. |
+| `ui-mobile` | 68 | The same tests on a Pixel 5. The journal renders cards instead of a table below `lg`, and the nav becomes a drawer. |
 | `server-contract` | 17 | `server.js` itself: real 404 statuses, CSP, brotli, `immutable` caching, sitemap, structured data. |
 | `a11y` | 19 | axe-core over twelve screens, in both themes, gated on a baseline. |
 | `visual` | 14 | Screenshots of eight screens, both themes, desktop and phone. |
@@ -192,8 +193,12 @@ the tests:
 - **`a11y-baseline.json` has one entry**: four light-theme contrast failures in
   the journal toolbar. Recorded so a *fifth* fails the build — not accepted as
   correct. Six entries came off that file while the suite was being written.
-- **CI needs one secret.** The application repositories are private, so
-  `APP_REPOS_TOKEN` must be a fine-grained PAT with read access to both.
+- **CI reads the application repositories over SSH**, with a read-only deploy
+  key per repository (`WEB_REPO_DEPLOY_KEY`, `API_REPO_DEPLOY_KEY`). A personal
+  access token would have worked too, but it would be one credential with read
+  access to everything the account can see, needing manual creation and manual
+  renewal. A deploy key is scoped to one repository, read-only, never expires,
+  and can be installed entirely from the CLI.
 - The CSV wizard's **drag-and-drop** path is not automatable: the drop zone is a
   plain `<div>` with no role. That is a gap in the component, noted rather than
   faked.
@@ -225,9 +230,10 @@ docs/                  ARCHITECTURE.md, TEST-PLAN.md
 # Türkçe
 
 [Tradelogie](https://tradelogie.com) için uçtan uca, API, erişilebilirlik ve
-görsel regresyon test altyapısı. Altı Playwright projesinde **259 test**. Suite
-uygulamanın iki yarısını da kendisi ayağa kaldırıyor, yani temiz bir makinede
-tek komutla koşuyor.
+görsel regresyon test altyapısı. Sekiz Playwright projesinde **287 test** —
+varsayılan koşuda 261 tanesi, yaklaşık 90 saniyede. Suite uygulamanın iki
+yarısını da kendisi ayağa kaldırıyor, yani temiz bir makinede tek komutla
+koşuyor.
 
 ## Koşturmak
 
@@ -318,5 +324,9 @@ olduğu yerde anlatılıyor.
 - **Görsel baseline'lar CI'da, Linux'ta üretiliyor**, başka hiçbir yerde: font
   rasterleştirmesi platform başına farklı, Windows'ta çekilen baseline runner'da
   her glif'in her pikselinde kırmızı yanar.
-- **CI bir secret istiyor**: uygulama repoları private olduğu için
-  `APP_REPOS_TOKEN` olarak ikisine read erişimi olan bir fine-grained PAT.
+- **CI uygulama repolarını SSH ile okuyor**: repo başına salt-okunur birer
+  deploy key (`WEB_REPO_DEPLOY_KEY`, `API_REPO_DEPLOY_KEY`). PAT de olurdu ama
+  o, hesabın görebildiği her şeye read erişimi olan tek bir kimlik bilgisi
+  olurdu — elle üretilip elle yenilenmesi gerekirdi. Deploy key tek bir repoya
+  kapsamlı, salt-okunur, süresi dolmuyor ve tamamen komut satırından
+  kurulabiliyor.

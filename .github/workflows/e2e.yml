@@ -50,22 +50,25 @@ jobs:
       - name: Check out the suite
         uses: actions/checkout@v4
 
-      # The application repositories are private, so these need a token with
-      # read access to both. A fine-grained PAT in the APP_REPOS_TOKEN secret;
-      # the default GITHUB_TOKEN is scoped to this repository only.
+      # A read-only DEPLOY KEY per repository, not a personal access token.
+      # A PAT would be one credential with read access to everything the
+      # account can see, needing manual creation and manual renewal; a deploy
+      # key is scoped to exactly one repository, read-only, has no expiry, and
+      # could be installed without anyone opening a browser. If one leaks, it
+      # reads one repository and nothing else.
       - name: Check out the web client
         uses: actions/checkout@v4
         with:
           repository: MFMetin/trading_journal_web
           path: app-web
-          token: ${{ secrets.APP_REPOS_TOKEN }}
+          ssh-key: ${{ secrets.WEB_REPO_DEPLOY_KEY }}
 
       - name: Check out the API
         uses: actions/checkout@v4
         with:
           repository: MFMetin/trading_journal_backend
           path: app-api
-          token: ${{ secrets.APP_REPOS_TOKEN }}
+          ssh-key: ${{ secrets.API_REPO_DEPLOY_KEY }}
 
       - uses: actions/setup-node@v4
         with:
@@ -165,7 +168,7 @@ jobs:
         with:
           repository: MFMetin/trading_journal_backend
           path: app-api
-          token: ${{ secrets.APP_REPOS_TOKEN }}
+          ssh-key: ${{ secrets.API_REPO_DEPLOY_KEY }}
 
       - uses: actions/setup-node@v4
         with:

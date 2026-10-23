@@ -6,8 +6,8 @@ an alternative, and most of them were made after the alternative went wrong.
 ## The layers, and what each one is for
 
 ```
-tests/api/            81  no browser        the HTTP contract
-tests/ui/            132  Chromium ×2       the app, desktop and phone
+tests/api/            75  no browser        the HTTP contract
+tests/ui/            136  Chromium ×2       the app, desktop and phone
 tests/server/         17  request only      server.js: 404s, CSP, caching, SEO
 tests/a11y/           19  Chromium + axe    twelve screens, two themes
 tests/visual/         14  Chromium          screenshots, two themes, two widths
@@ -318,9 +318,16 @@ automatically will eventually run against something it should not.
 
 `e2e.yml` checks out all three repositories, starts Postgres as a service, and
 lets Playwright's `webServer` do the rest — so CI runs the same three commands a
-person runs locally. The application repositories are private, so it needs
-`APP_REPOS_TOKEN`: a fine-grained PAT with read access to both. The default
-`GITHUB_TOKEN` is scoped to this repository only.
+person runs locally.
+
+The application repositories are private and the default `GITHUB_TOKEN` is
+scoped to this one, so they are read over SSH with a **read-only deploy key per
+repository**. A personal access token was the obvious choice and is the worse
+one: it would be a single credential with read access to everything the account
+can see, created by hand in a browser and renewed by hand when it expires. A
+deploy key is scoped to exactly one repository, read-only, has no expiry, and
+installs from the CLI — `gh api repos/.../keys` to add the public half,
+`gh secret set` for the private half. If one leaks it reads one repository.
 
 `smoke-prod.yml` is the one that needs no secret at all, and it is the more
 useful badge. It imports nothing from `src/` — not even the env config, which
