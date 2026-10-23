@@ -32,11 +32,16 @@ const TOKEN = __ENV.K6_TOKEN;
  * out of a README, forget to change the host. So the host is checked here, at
  * the top, and the run aborts rather than warns.
  */
-const host = new URL(BASE_URL).hostname;
-if (!['localhost', '127.0.0.1', '::1'].includes(host)) {
+// Parsed with a regex, not `new URL()`: k6 runs on goja, which has no WHATWG
+// URL global. The first version of this guard threw `URL is not defined` and
+// took the whole run down with it — which at least failed safe, but told
+// nobody anything useful.
+const host = (BASE_URL.match(/^[a-z]+:\/\/([^/:]+)/i) || [])[1];
+if (!host || ['localhost', '127.0.0.1', '[::1]'].indexOf(host) === -1) {
   fail(
-    `Refusing to run: K6_BASE_URL points at "${host}". ` +
-      'This script only ever runs against a local API.',
+    'Refusing to run: K6_BASE_URL points at "' +
+      String(host) +
+      '". This script only ever runs against a local API.',
   );
 }
 
