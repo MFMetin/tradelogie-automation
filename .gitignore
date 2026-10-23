@@ -1,0 +1,22 @@
+node_modules/
+.env
+.env.local
+
+# Playwright
+/test-results/
+/playwright-report/
+/playwright/.cache/
+/blob-report/
+
+# Allure
+/allure-results/
+/allure-report/
+
+# Worker-scoped auth state written by global setup
+/.auth/
+
+# Visual baselines are generated in CI (Linux). Font rasterisation differs per
+# platform, so a snapshot taken on Windows fails on the runner and vice versa.
+# Only the Linux baselines are committed; see docs/ARCHITECTURE.md.
+**/*-darwin.png
+**/*-win32.png

@@ -1,0 +1,38 @@
+{
+  "name": "tradelogie-automation",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "End-to-end, API, accessibility and visual regression suite for Tradelogie",
+  "scripts": {
+    "test": "playwright test",
+    "test:api": "playwright test --project=api",
+    "test:ui": "playwright test --project=ui-desktop --project=ui-mobile",
+    "test:server": "playwright test --project=server-contract",
+    "test:a11y": "playwright test --project=a11y",
+    "test:visual": "playwright test --project=visual",
+    "test:ratelimit": "tsx scripts/run-rate-limit.ts",
+    "test:smoke": "playwright test --config=playwright.prod.config.ts",
+    "test:headed": "playwright test --project=ui-desktop --headed",
+    "test:ui-mode": "playwright test --ui",
+    "db:setup": "tsx scripts/setup-test-db.ts",
+    "fixtures:csv": "tsx scripts/make-csv-fixtures.ts",
+    "report": "playwright show-report",
+    "report:allure": "allure generate allure-results --clean -o allure-report && allure open allure-report",
+    "typecheck": "tsc --noEmit",
+    "k6": "tsx scripts/run-k6.ts"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^24.10.1",
+    "@types/pg": "^8.23.1",
+    "allure-commandline": "^2.46.1",
+    "allure-playwright": "^3.14.0",
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^17.2.4",
+    "pg": "^8.23.1",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3"
+  }
+}
