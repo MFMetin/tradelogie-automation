@@ -232,6 +232,39 @@ the live site and needs no secret at all. [`pages.yml`](.github/workflows/pages.
 publishes both reports from the run that triggered it — Playwright's for the
 trace viewer, Allure's for trends across runs.
 
+## What this suite is allowed to leak, and what it is not
+
+This is a public repository that runs tests against a real application, so it is
+worth being explicit rather than hoping nobody asks.
+
+**Nothing private is committed, and nothing ever was.** `.env` has never been in
+a commit; the full history contains no private key, no `.pem`, no `.key`. The
+two credentials CI needs are read-only deploy keys whose private halves live in
+GitHub's write-only secret store and were deleted from disk as soon as they were
+uploaded. `.env.example` holds placeholders and a fixture password for a
+database that only exists on localhost.
+
+**Three things do reach public places, all on purpose, and all inert:**
+
+| What | Where | Why it cannot be used |
+|---|---|---|
+| Access tokens for test accounts | Playwright traces, uploaded only when CI fails, kept 7 days | Signed with the CI backend's dev fallback secret, and belonging to `*@tradelogie.test` rows in a Postgres service container that is destroyed with the runner. Production uses its own `JWT_SECRET` and rejects them — checked, not assumed. |
+| Fixture emails and the shared fixture password | Run logs, `.env.example` | They authenticate against the local throwaway database and nothing else. |
+| The suite's own knowledge of the app | Every file here | Which endpoint answers what, and which bugs existed. That is the point of a public portfolio, and it is also why no test here contains a real credential. |
+
+**One thing used to reach a public place and should not have.** With no
+`RESEND_API_KEY` the API logs the whole email body it would have sent, raw
+verification token included — which is useful locally, and the suite piped it
+into CI, where the logs of a public repository are public. Those tokens were
+inert for the reasons above, but the suite should not be the reason a token
+lands somewhere public, and the day this is pointed at a shared database it
+stops being harmless.
+
+`playwright.config.ts` now forwards that stdout locally and ignores it in CI.
+`stderr` stays piped either way: it carries what makes a failed run readable,
+and the email body is written with `console.log`. The affected runs and
+artifacts were deleted.
+
 ## Layout
 
 ```
