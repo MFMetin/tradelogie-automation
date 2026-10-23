@@ -15,8 +15,21 @@ node_modules/
 # Worker-scoped auth state written by global setup
 /.auth/
 
-# Visual baselines are generated in CI (Linux). Font rasterisation differs per
-# platform, so a snapshot taken on Windows fails on the runner and vice versa.
-# Only the Linux baselines are committed; see docs/ARCHITECTURE.md.
-**/*-darwin.png
-**/*-win32.png
+# Visual baselines are generated in CI, on Linux. Font rasterisation differs
+# per platform, so a snapshot taken on Windows fails on the runner on every
+# pixel of every glyph. Only the Linux set is committed — see
+# docs/ARCHITECTURE.md.
+#
+# These are DIRECTORIES, not filename suffixes: snapshotPathTemplate puts the
+# platform in the path (__screenshots__/win32/…/analytics.png), and a pattern
+# containing a slash is anchored to this file's directory, so the leading
+# `**/` is needed too.
+#
+# The first version of this rule was `**/*-win32.png`, which matched a filename
+# suffix and therefore nothing at all — it would have committed a Windows
+# baseline and left CI red forever.
+**/__screenshots__/darwin/
+**/__screenshots__/win32/
+
+# Written by the k6 run
+/k6/summary.json

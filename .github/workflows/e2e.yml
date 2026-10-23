@@ -1,0 +1,187 @@
+name: e2e
+
+# The suite runs against the application, which lives in two other
+# repositories. Those are checked out here, built, and started by Playwright's
+# own `webServer` — so this workflow is the same three commands a person runs
+# locally, with a Postgres service instead of a local one.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Nightly, so a break in the app that nobody pushed to this repo still
+    # surfaces within a day.
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: trading_journal_e2e
+        ports: ['5432:5432']
+        # Without the health check the first `prisma db push` races the
+        # container's own startup and fails with a connection error.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/trading_journal_e2e
+      WEB_REPO: ./app-web
+      API_REPO: ./app-api
+      E2E_LANG: en
+      APP_MODE: build
+
+    steps:
+      - name: Check out the suite
+        uses: actions/checkout@v4
+
+      # The application repositories are private, so these need a token with
+      # read access to both. A fine-grained PAT in the APP_REPOS_TOKEN secret;
+      # the default GITHUB_TOKEN is scoped to this repository only.
+      - name: Check out the web client
+        uses: actions/checkout@v4
+        with:
+          repository: MFMetin/trading_journal_web
+          path: app-web
+          token: ${{ secrets.APP_REPOS_TOKEN }}
+
+      - name: Check out the API
+        uses: actions/checkout@v4
+        with:
+          repository: MFMetin/trading_journal_backend
+          path: app-api
+          token: ${{ secrets.APP_REPOS_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            app-web/package-lock.json
+            app-api/package-lock.json
+
+      - name: Install
+        run: |
+          npm ci
+          npm ci --prefix app-web
+          npm ci --prefix app-api
+
+      - name: Prepare the database
+        working-directory: app-api
+        run: |
+          npx prisma generate
+          npx prisma db push
+          # Lesson, quiz and achievement content. The quiz tests read the
+          # answer key out of these rows, so the suite has nothing to grade
+          # without it. Safe here because the database is new every run —
+          # locally it is run once, since it uses `create` and not `upsert`.
+          npm run db:seed
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the suite
+        run: >-
+          npx playwright test
+          --project=api
+          --project=ui-desktop
+          --project=ui-mobile
+          --project=server-contract
+          --project=a11y
+
+      # Uploaded on failure as well as success: the trace is the whole point of
+      # having one, and a failed run is when it is wanted.
+      - name: Upload the HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
+
+      - name: Upload traces and videos
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: test-results/
+          retention-days: 7
+
+      - name: Upload the Allure results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results
+          path: allure-results/
+          retention-days: 14
+
+  # The limiters are passthroughs for the run above, so the tests that assert
+  # they exist get their own job and their own backend. Serial, one worker, and
+  # a job of its own so its in-memory buckets are nobody else's problem.
+  rate-limit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: trading_journal_e2e
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/trading_journal_e2e
+      WEB_REPO: ./app-web
+      API_REPO: ./app-api
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out the API
+        uses: actions/checkout@v4
+        with:
+          repository: MFMetin/trading_journal_backend
+          path: app-api
+          token: ${{ secrets.APP_REPOS_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npm ci --prefix app-api
+
+      - name: Prepare the database
+        working-directory: app-api
+        run: |
+          npx prisma generate
+          npx prisma db push
+          npm run db:seed
+
+      # No browser: this project is API-only.
+      - name: Run the rate-limit project
+        run: npm run test:ratelimit

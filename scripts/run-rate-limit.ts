@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { node, playwrightCli } from './spawn';
 
 /**
  * Runs the rate-limit project against a backend of its own.
@@ -11,11 +11,10 @@ import { spawnSync } from 'node:child_process';
  */
 const PORT = process.env.RATE_LIMIT_API_PORT ?? '8082';
 
-const result = spawnSync(
-  process.platform === 'win32' ? 'npx.cmd' : 'npx',
-  ['playwright', 'test', '--config=playwright.ratelimit.config.ts', ...process.argv.slice(2)],
+const result = node(
+  playwrightCli(),
+  ['test', '--config=playwright.ratelimit.config.ts', ...process.argv.slice(2)],
   {
-    stdio: 'inherit',
     env: {
       ...process.env,
       API_PORT: PORT,

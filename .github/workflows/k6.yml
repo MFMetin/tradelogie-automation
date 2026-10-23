@@ -1,0 +1,109 @@
+name: load (k6)
+
+# Manual only, and against a backend this job starts itself.
+#
+# Not on push, and not on a schedule: a load profile that runs automatically is
+# a load profile that will eventually run against something it should not, and
+# the numbers from a shared CI runner are not comparable between runs anyway.
+# What this is for is answering "did that change make /trades slower?" on
+# demand, with a report attached.
+on:
+  workflow_dispatch:
+    inputs:
+      trades:
+        description: 'Rows to seed before measuring'
+        required: false
+        default: '250'
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: trading_journal_e2e
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/trading_journal_e2e
+      API_REPO: ./app-api
+      WEB_REPO: ./app-web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out the API
+        uses: actions/checkout@v4
+        with:
+          repository: MFMetin/trading_journal_backend
+          path: app-api
+          token: ${{ secrets.APP_REPOS_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npm ci --prefix app-api
+
+      - name: Prepare the database
+        working-directory: app-api
+        run: |
+          npx prisma generate
+          npx prisma db push
+          npm run db:seed
+
+      - uses: grafana/setup-k6-action@v1
+
+      # Started here rather than by Playwright: this job runs no Playwright
+      # tests, and the profile needs the limiters off or it measures them
+      # instead of the application.
+      - name: Start the API
+        working-directory: app-api
+        env:
+          PORT: 8081
+          NODE_ENV: development
+          DISABLE_RATE_LIMIT: 'true'
+          ENABLE_MOCK_BILLING: 'true'
+          ADMIN_EMAILS: e2e-admin@tradelogie.test
+          APP_WEB_URL: http://localhost:4180
+          ALLOWED_ORIGINS: http://localhost:4180
+        run: |
+          npm run dev > "${{ runner.temp }}/api.log" 2>&1 &
+          for attempt in $(seq 1 60); do
+            if curl -sf http://localhost:8081/health > /dev/null; then
+              echo "API is up"; exit 0
+            fi
+            sleep 1
+          done
+          echo "API never came up:"; cat "${{ runner.temp }}/api.log"; exit 1
+
+      - name: Run the profile
+        run: npm run k6
+
+      - name: Upload the summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-summary
+          path: k6/summary.json
+          retention-days: 30
+
+      - name: Upload the API log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-log
+          path: ${{ runner.temp }}/api.log
+          retention-days: 7

@@ -86,7 +86,13 @@ export default defineConfig({
   forbidOnly: !!env.isCI,
   retries: env.isCI ? 2 : 0,
   workers: env.isCI ? 4 : undefined,
-  timeout: 45_000,
+  // Roomy on purpose. A test that needs its own account waits out
+  // `adminWriteLimiter` when several workers ask at once — every fixture
+  // account in the run is minted by the same admin, and the suite respects
+  // that limiter rather than switching it off. 45s was not enough for a test
+  // that spent 30 of them being politely throttled, and the failure read as
+  // the test being slow rather than as the suite queueing.
+  timeout: 90_000,
   expect: { timeout: 10_000 },
 
   reporter: env.isCI

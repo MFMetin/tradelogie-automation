@@ -1,0 +1,8 @@
+[
+  {
+    "screen": "journal:light",
+    "rule": "color-contrast",
+    "nodes": 4,
+    "note": "Light theme only. Four muted-on-glass elements in the journal toolbar fall under 4.5:1. The app is dark-first and these tokens were never re-checked against the light surface, so this needs a design-token change rather than a markup one. Recorded so a FIFTH one fails the build — not accepted as correct."
+  }
+]

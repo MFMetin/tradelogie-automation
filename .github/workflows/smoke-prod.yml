@@ -1,0 +1,50 @@
+name: smoke (production)
+
+# Read-only checks against the live site. No secrets, no sign-in, no writes —
+# every assertion is a GET a crawler could make. That is what makes this safe
+# to run on a schedule against something real, and it is the badge whose green
+# actually means "the thing visitors get is working".
+on:
+  schedule:
+    # Twice a day. A deploy that broke the CSP, the 404 handling or the sitemap
+    # is invisible on the site itself, so nothing else would notice.
+    - cron: '0 6,18 * * *'
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Site to check (https only)'
+        required: false
+        default: 'https://tradelogie.com'
+
+concurrency:
+  group: smoke-prod
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      - name: Smoke the live site
+        env:
+          SMOKE_BASE_URL: ${{ inputs.base_url || 'https://tradelogie.com' }}
+        run: npm run test:smoke
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-report
+          path: playwright-report/
+          retention-days: 7

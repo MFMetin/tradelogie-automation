@@ -1,0 +1,129 @@
+name: report
+
+# Publishes the last run's reports to GitHub Pages, so a link is enough to read
+# a failure — no downloading an artifact and unzipping it to see which
+# assertion broke.
+#
+# Both reporters are published because they answer different questions.
+# Playwright's HTML report has the trace viewer: for a failed test it shows the
+# DOM, the network and a screenshot at every step. Allure aggregates across
+# runs: which tests are flaky, how long the suite takes, how coverage of each
+# area is moving.
+on:
+  workflow_run:
+    workflows: [e2e]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # From the `e2e` run that triggered this, not from a fresh run: the point
+      # is to publish what actually happened.
+      - name: Fetch the HTML report
+        uses: actions/download-artifact@v4
+        with:
+          name: playwright-report
+          path: site/playwright
+          run-id: ${{ github.event.workflow_run.id || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Fetch the Allure results
+        uses: actions/download-artifact@v4
+        with:
+          name: allure-results
+          path: allure-results
+          run-id: ${{ github.event.workflow_run.id || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Build the Allure report
+        run: |
+          if [ -d allure-results ] && [ "$(ls -A allure-results)" ]; then
+            npx allure generate allure-results --clean -o site/allure
+          else
+            echo "No Allure results in that run; skipping."
+          fi
+
+      - name: Write the index
+        run: |
+          mkdir -p site
+          cat > site/index.html <<'HTML'
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>Tradelogie — test reports</title>
+            <style>
+              :root { color-scheme: dark light; }
+              body {
+                margin: 0; min-height: 100vh;
+                display: grid; place-items: center;
+                font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+                background: #0b0f14; color: #e8ecf2;
+              }
+              main { max-width: 34rem; padding: 2rem; }
+              h1 { font-size: 1.5rem; margin: 0 0 .25rem; }
+              p.sub { margin: 0 0 2rem; color: #94a3b8; }
+              a.card {
+                display: block; padding: 1rem 1.25rem; margin-bottom: .75rem;
+                border: 1px solid #1e293b; border-radius: 12px;
+                color: inherit; text-decoration: none; background: #111827;
+              }
+              a.card:hover { border-color: #3b82f6; }
+              a.card b { display: block; }
+              a.card span { color: #94a3b8; font-size: .9rem; }
+            </style>
+          </head>
+          <body>
+            <main>
+              <h1>Tradelogie — test reports</h1>
+              <p class="sub">Published from the most recent <code>e2e</code> run on <code>main</code>.</p>
+              <a class="card" href="./playwright/">
+                <b>Playwright report</b>
+                <span>Per-test results, with the trace viewer for anything that failed.</span>
+              </a>
+              <a class="card" href="./allure/">
+                <b>Allure report</b>
+                <span>Trends across runs: flakiness, duration, coverage by area.</span>
+              </a>
+            </main>
+          </body>
+          </html>
+          HTML
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

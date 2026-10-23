@@ -2,6 +2,7 @@ import { test, expect } from '../../../src/fixtures/base';
 import { t } from '../../../src/utils/i18n';
 import { newApiContext, body } from '../../../src/api/client';
 import type { ApiUser } from '../../../src/api/client';
+import { JournalPage } from '../../../src/pages/JournalPage';
 
 /** Every route behind `PremiumGate`, from App.tsx. */
 const GATED = ['/dashboard', '/journal', '/markets', '/analytics', '/education'] as const;
@@ -39,16 +40,22 @@ test.describe('the paywall', () => {
     // `/billing/activate-mock { days: 30 }`, which needs only a session.
     await page.getByRole('button', { name: t('bl.activateTest') }).click();
 
-    await expect
-      .poll(
-        async () => {
-          await page.goto('/journal');
-          return new URL(page.url()).pathname;
-        },
-        { timeout: 20_000, message: 'the journal never opened after the grant' },
-      )
-      .toBe('/journal');
+    // The app takes it from here, and the test lets it. Two earlier versions
+    // navigated to /journal themselves and were flaky for the same reason:
+    // `AuthContext` renders from the cached `tj_user` before `/users/me`
+    // answers, so a fresh navigation right after the grant boots with the
+    // stale, non-premium profile, `PremiumGate` bounces to /billing, and the
+    // revalidation then arrives on a page with no gate left to reopen.
+    //
+    // BillingPage refreshes the profile and returns to where the user was
+    // blocked, which is the behaviour worth asserting anyway.
+    const journal = new JournalPage(page);
+    await expect(page, 'the app should return to the blocked page').toHaveURL(/\/journal$/, {
+      timeout: 20_000,
+    });
+    await expect(journal.addTradeButton).toBeVisible();
 
+    // And the grant is real server-side, not just believed by the client.
     const api = await newApiContext(freeUser.accessToken);
     try {
       const profile = await body<ApiUser>(await api.get('users/me'));
