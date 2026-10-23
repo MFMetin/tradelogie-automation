@@ -1,11 +1,12 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { env, REPO_ROOT } from '../config/env';
+import { env } from '../config/env';
 import { newApiContext } from '../api/client';
-import { loginOrThrow } from '../api/auth';
-import { insertAdminUser, deleteAllTestUsers } from '../db/users';
+import { deleteAllTestUsers } from '../db/users';
+import { ensureAdmin, ADMIN_STATE, readAdminState, type AdminState } from './admin';
 
-export const ADMIN_STATE = path.join(REPO_ROOT, '.auth', 'admin.json');
+// Re-exported so the many modules that already import these from here keep
+// working; the implementation moved to ./admin so scripts can use it too.
+export { ADMIN_STATE, readAdminState };
+export type { AdminState };
 
 /**
  * Fails the run, once, if the API still has its rate limiters on.
@@ -73,54 +74,6 @@ export default async function globalSetup(): Promise<void> {
   const removed = await deleteAllTestUsers();
   if (removed > 0) console.log(`[setup] removed ${removed} leftover test account(s)`);
 
-  const admin = await insertAdminUser(env.adminEmail, env.adminPassword);
-
-  const api = await newApiContext();
-  try {
-    const session = await loginOrThrow(api, admin.email, admin.password);
-
-    if (session.user.role !== 'admin') {
-      // The role is granted at registration from ADMIN_EMAILS, and this row is
-      // inserted with it directly — so this only fires if the insert changed.
-      throw new Error(
-        `Bootstrap account is role "${session.user.role}", not admin. ` +
-          'Fixtures cannot verify or grant premium to other accounts without it.',
-      );
-    }
-
-    fs.mkdirSync(path.dirname(ADMIN_STATE), { recursive: true });
-    fs.writeFileSync(
-      ADMIN_STATE,
-      JSON.stringify(
-        {
-          id: session.user_id,
-          email: admin.email,
-          password: admin.password,
-          accessToken: session.access_token,
-          refreshToken: session.refresh_token,
-          user: session.user,
-        },
-        null,
-        2,
-      ),
-    );
-    console.log(`[setup] admin ready: ${admin.email}`);
-  } finally {
-    await api.dispose();
-  }
-}
-
-export interface AdminState {
-  id: string;
-  email: string;
-  password: string;
-  accessToken: string;
-  refreshToken: string;
-}
-
-export function readAdminState(): AdminState {
-  if (!fs.existsSync(ADMIN_STATE)) {
-    throw new Error(`Admin state missing at ${ADMIN_STATE} — did global setup run?`);
-  }
-  return JSON.parse(fs.readFileSync(ADMIN_STATE, 'utf8')) as AdminState;
+  const admin = await ensureAdmin();
+  console.log(`[setup] admin ready: ${admin.email}`);
 }

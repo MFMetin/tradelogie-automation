@@ -1,6 +1,7 @@
 import { binary } from './spawn';
 import { env } from '../src/config/env';
 import { createPremiumUser } from '../src/fixtures/users';
+import { ensureAdmin } from '../src/fixtures/admin';
 import { closePool } from '../src/db/pool';
 
 /**
@@ -42,6 +43,13 @@ async function main(): Promise<void> {
         '  cd ../trading_journal_backend && PORT=8081 DISABLE_RATE_LIMIT=true npm run dev',
     );
   }
+
+  // Every fixture account is minted by the bootstrap admin, and nothing has
+  // created it here — this job runs no Playwright tests, so no global setup
+  // has run. Asking for one without this failed with "Admin state missing —
+  // did global setup run?", which is an honest question and a useless answer.
+  console.log('Bootstrapping the admin…');
+  await ensureAdmin();
 
   console.log('Minting a load-test account…');
   const user = await createPremiumUser('k6');
