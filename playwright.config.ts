@@ -64,7 +64,25 @@ const webServers = [
     env: BACKEND_ENV,
     reuseExistingServer: !env.isCI,
     timeout: 120_000,
-    stdout: 'pipe' as const,
+
+    // stdout is NOT forwarded in CI, and that is a security decision rather
+    // than a tidiness one.
+    //
+    // With no RESEND_API_KEY the API logs the whole email body it would have
+    // sent — including the verification link, with the raw token in it. That is
+    // genuinely useful locally. In CI it went into a workflow log, and the logs
+    // of a public repository are public, so single-use tokens for throwaway
+    // accounts were readable by anyone.
+    //
+    // They were not exploitable: the accounts live in a Postgres service
+    // container that dies with the runner, and production has the API key so it
+    // sends mail instead of logging it. But the suite should not be the reason
+    // a token ends up in a public place, and the day somebody points this at a
+    // shared database it stops being harmless.
+    //
+    // stderr stays piped: it carries the diagnostics that make a failed CI run
+    // readable, and the email body is written with console.log.
+    stdout: (env.isCI ? 'ignore' : 'pipe') as 'ignore' | 'pipe',
     stderr: 'pipe' as const,
   },
   {
